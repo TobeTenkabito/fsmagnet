@@ -1,0 +1,74 @@
+fsmagnet/
+├── core/
+│   ├── session.py          # libtorrent 会话管理
+│   ├── io_engine.py        # 高性能异步 I/O
+│   ├── peer_scheduler.py   # Peer 评分 + 分片调度
+│   └── bandwidth.py        # 自适应带宽控制器
+│
+├── network/
+│   ├── dht.py              # DHT Bootstrap 加速
+│   ├── nat.py              # NAT 穿透
+│   └── encryption.py       # 协议加密
+│
+├── utils/
+│   ├── system_probe.py     # 探测本机硬件
+│   └── speed_monitor.py    # 实时速度统计
+│
+├── api/                    # ⭐ 新增：FastAPI 后端接口
+│   ├── __init__.py
+│   ├── routes/
+│   │   ├── download.py     # 下载管理接口
+│   │   ├── settings.py     # 设置接口
+│   │   └── stats.py        # 实时统计接口（SSE）
+│   └── server.py           # FastAPI 启动入口
+│
+├── ui/                     # ⭐ 新增：前端 Vue3 项目
+│   ├── src/
+│   │   ├── components/
+│   │   │   ├── TaskList.vue        # 任务列表
+│   │   │   ├── TaskCard.vue        # 单个任务卡片
+│   │   │   ├── AddMagnet.vue       # 添加磁力弹窗
+│   │   │   ├── SpeedChart.vue      # 实时速度图表
+│   │   │   └── SettingsPanel.vue   # 设置面板
+│   │   ├── App.vue
+│   │   └── main.js
+│   ├── index.html
+│   ├── vite.config.js
+│   ├── dist/               # 构建产物（打包进 exe）
+│   └── package.json
+│
+├── main.py                 # ⭐ 程序总入口（PyWebView 启动）
+├── config.py               # 配置
+├── build.spec           # ⭐ PyInstaller 打包配置
+└── build.py                # ⭐ 一键构建脚本
+
+
+⚡ 与 qBittorrent 的核心差异对比
+维度	qBittorrent	本项目
+内存缓存	固定默认值	按本机 RAM 25% 动态分配
+连接数	保守上限	按 CPU 核数动态计算
+磁盘写入	通用策略	批量合并 + 异步 io_uring
+协议加密	默认关闭	强制开启绕过 ISP
+Peer 剔除	无主动剔除	定期剔除低分 Peer
+上传限制	默认不限	限制上传，带宽全给下载
+UI 开销	Qt GUI 占资源	纯异步 CLI，零 UI 开销
+
+
+用户双击 FSMagnet.exe
+        │
+        ▼
+   main.py 启动
+        │
+        ├─── 子线程: FastAPI (uvicorn) 监听 127.0.0.1:17878
+        │         │
+        │         └── 加载 core/session.py（libtorrent 初始化）
+        │
+        ├─── 等待后端就绪（最多15秒）
+        │
+        └─── PyWebView 打开窗口
+                  │
+                  └── 加载 http://127.0.0.1:17878
+                            │
+                            └── Vue3 前端（来自 ui/dist/）
+                                      │
+                                      └── SSE 订阅实时速度推送
