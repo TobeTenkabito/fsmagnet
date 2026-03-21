@@ -1,0 +1,34 @@
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
+from typing import Optional
+import api.server as srv
+
+router = APIRouter(prefix="/api/settings", tags=["settings"])
+
+
+class SettingsUpdate(BaseModel):
+    save_path:          Optional[str] = None
+    upload_limit_kb:    Optional[int] = None   # 上传限速 KB/s，0=不限
+    download_limit_kb:  Optional[int] = None   # 下载限速 KB/s，0=不限
+    connections_limit:  Optional[int] = None   # 最大连接数
+    cache_mb:           Optional[int] = None   # 缓存大小 MB
+    force_encryption:   Optional[bool] = None  # 强制加密
+
+
+@router.get("/")
+async def get_settings():
+    """读取当前配置"""
+    settings = srv.turbo_session.get_settings()
+    return {"ok": True, "settings": settings}
+
+
+@router.patch("/")
+async def update_settings(req: SettingsUpdate):
+    """更新配置并实时应用到 session"""
+    try:
+        data = req.dict(exclude_none=True)
+        await srv.turbo_session.apply_settings(data)
+        settings = srv.turbo_session.get_settings()
+        return {"ok": True, "settings": settings}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
