@@ -8,8 +8,12 @@
       </div>
       <div class="topbar-actions">
         <div class="global-speed">
-          <span class="speed-label">↓</span>
+          <span class="speed-label dl">↓</span>
           <span class="speed-val">{{ formatSpeed(globalSpeed) }}</span>
+        </div>
+        <div class="global-speed">
+          <span class="speed-label ul">↑</span>
+          <span class="speed-val ul-val">{{ formatSpeed(globalUpload) }}</span>
         </div>
         <button class="btn-add" @click="showAdd = true">＋ 添加磁力</button>
         <button class="btn-icon" @click="showSettings = true">⚙</button>
@@ -23,6 +27,7 @@
         @pause="handlePause"
         @resume="handleResume"
         @remove="handleRemove"
+        @stop-seed="handleStopSeed"
       />
     </main>
 
@@ -33,7 +38,7 @@
 
 <script setup>
 import { ref, onMounted, onUnmounted } from 'vue'
-import { downloadApi, statsApi, subscribeStats } from './api/index.js'
+import { downloadApi, subscribeStats } from './api/index.js'
 import SpeedChart    from './components/SpeedChart.vue'
 import TaskList      from './components/TaskList.vue'
 import AddMagnet     from './components/AddMagnet.vue'
@@ -41,6 +46,7 @@ import SettingsPanel from './components/SettingsPanel.vue'
 
 const tasks        = ref([])
 const globalSpeed  = ref(0)
+const globalUpload = ref(0)
 const speedHistory = ref([])
 const showAdd      = ref(false)
 const showSettings = ref(false)
@@ -49,44 +55,38 @@ let sse       = null
 let pollTimer = null
 let sseOk     = false
 
-// ── 统一数据处理 ─────────────────────────────────────────
+// ── 统一数据处理 ───────────────────────────────────────────
 function applyStats(data) {
   if (data.tasks        != null) tasks.value       = data.tasks
   if (data.global_speed != null) globalSpeed.value = data.global_speed
+  if (data.global_ul    != null) globalUpload.value = data.global_ul
 
   speedHistory.value.push({
-    time:  new Date().toLocaleTimeString(),
-    speed: Math.round((data.global_speed ?? 0) / 1024),
+    time:     new Date().toLocaleTimeString(),
+    download: Math.round((data.global_speed ?? 0) / 1024),
+    upload:   Math.round((data.global_ul   ?? 0) / 1024),
   })
   if (speedHistory.value.length > 60) speedHistory.value.shift()
 }
 
-// ── 降级轮询：同时拉任务列表 + 全局统计 ─────────────────
+// ── 降级轮询 ───────────────────────────────────────────────
 async function poll() {
   try {
-    const [listRes, statsRes] = await Promise.all([
-      downloadApi.list(),
-      statsApi.get(),
-    ])
-    const merged = {
-      tasks:        listRes.data?.tasks        ?? [],
-      global_speed: statsRes.data?.stats?.global_speed ?? 0,
-      global_ul:    statsRes.data?.stats?.global_ul    ?? 0,
-      dht_nodes:    statsRes.data?.stats?.dht_nodes    ?? 0,
-    }
-    applyStats(merged)
+    const data = await downloadApi.list()
+    applyStats({
+      tasks:        data.tasks        ?? [],
+      global_speed: data.global_speed ?? 0,
+      global_ul:    data.global_ul    ?? 0,
+    })
   } catch (_) {}
 }
 
-// ── 生命周期 ─────────────────────────────────────────────
+// ── 生命周期 ───────────────────────────────────────────────
 onMounted(() => {
-  // 优先 SSE
   sse = subscribeStats((data) => {
     sseOk = true
     applyStats(data)
   })
-
-  // 3 秒内 SSE 没数据 → 启动轮询兜底
   setTimeout(() => {
     if (!sseOk) {
       console.warn('[FSMagnet] SSE 未就绪，降级为轮询模式')
@@ -101,18 +101,27 @@ onUnmounted(() => {
   clearInterval(pollTimer)
 })
 
-// ── 工具函数 ─────────────────────────────────────────────
+// ── 工具函数 ───────────────────────────────────────────────
 function formatSpeed(bps) {
-  if (bps < 1024)         return `${bps} B/s`
-  if (bps < 1024 * 1024)  return `${(bps / 1024).toFixed(1)} KB/s`
+  if (bps < 1024)        return `${bps} B/s`
+  if (bps < 1024 * 1024) return `${(bps / 1024).toFixed(1)} KB/s`
   return `${(bps / 1024 / 1024).toFixed(2)} MB/s`
 }
 
-// ── 事件处理 ─────────────────────────────────────────────
+// ── 事件处理 ───────────────────────────────────────────────
 async function handleAdded()    { showAdd.value = false }
 async function handlePause(id)  { await downloadApi.pause(id) }
 async function handleResume(id) { await downloadApi.resume(id) }
-async function handleRemove(id) { await downloadApi.remove(id) }
+
+async function handleRemove({ id, intent }) {
+  try   { await downloadApi.remove(id, intent) }
+  catch (e) { console.error('[handleRemove]', e) }
+}
+
+async function handleStopSeed(id) {
+  try   { await downloadApi.stopSeed(id) }
+  catch (e) { console.error('[handleStopSeed]', e) }
+}
 </script>
 
 <style scoped>
@@ -133,8 +142,12 @@ async function handleRemove(id) { await downloadApi.remove(id) }
 .global-speed {
   background: #1e2130; border-radius: 8px;
   padding: 4px 12px; font-size: 14px; color: #4ade80;
+  display: flex; align-items: center; gap: 4px;
 }
-.speed-label { margin-right: 4px; opacity: 0.6; }
+.speed-label    { opacity: 0.7; font-size: 13px; }
+.speed-label.ul { color: #fb923c; }
+.speed-label.dl { color: #4ade80; }
+.ul-val         { color: #fb923c; }
 
 .btn-add {
   background: #7c8cff; color: #fff; border: none;

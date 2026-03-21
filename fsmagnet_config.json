@@ -1,0 +1,41 @@
+{
+  "save_path": "./downloads",
+  "connections_limit": 500,
+  "upload_limit_kb": 100,
+  "download_limit_kb": 0,
+  "active_downloads": 5,
+  "active_seeds": 10,
+  "cache_mb": 512,
+  "coalesce_writes": true,
+  "preallocate_disk": true,
+  "force_encryption": true,
+  "enable_dht": true,
+  "enable_lsd": true,
+  "enable_upnp": true,
+  "enable_natpmp": true,
+  "listen_port_start": 6881,
+  "listen_port_end": 6891,
+  "dht_bootstrap_nodes": [
+    [
+      "router.bittorrent.com",
+      6881
+    ],
+    [
+      "router.utorrent.com",
+      6881
+    ],
+    [
+      "dht.transmissionbt.com",
+      6881
+    ],
+    [
+      "dht.aelitis.com",
+      6881
+    ]
+  ],
+  "request_queue_time": 3,
+  "max_out_request_queue": 1500,
+  "piece_timeout": 20,
+  "peer_timeout": 20,
+  "whole_pieces_threshold": 20
+}

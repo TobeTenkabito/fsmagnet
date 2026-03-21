@@ -19,6 +19,14 @@ from utils.system_probe import probe
 from utils.speed_monitor import monitor
 from core.bandwidth import BandwidthController
 from core.peer_scheduler import PeerScheduler
+from enum import Enum
+
+
+class RemoveIntent(str, Enum):
+    STOP_SEED = "stop_seed"  # 仅停止做种，保留文件 + resume data（可恢复）
+    REMOVE_TASK = "remove_task"  # 移除任务，保留文件，清掉 resume data（不可恢复）
+    DELETE_ALL = "delete_all"  # 移除任务 + 删除文件（彻底清除）
+
 
 logger = logging.getLogger("fsmagnet.session")
 
@@ -43,6 +51,10 @@ class DownloadTask:
     handle: lt.torrent_handle
     added_at: float = field(default_factory=time.time)
     scheduler: Optional[PeerScheduler] = None
+
+    # 做种相关
+    total_uploaded: int = 0
+    seeding_started_at: float = 0.0
 
     # 缓存的上一次状态（用于速度计算）
     _last_bytes: int = 0
@@ -241,15 +253,67 @@ class TurboSession:
         self._tasks[task_id] = task
         logger.info(f"Torrent 任务已添加: {task_id} - {info.name()}")
 
-    async def remove_task(self, task_id: str, delete_files: bool = False) -> bool:
+    # ── TurboSession.remove_task 重构 ────────────────────────
+    async def remove_task(
+            self,
+            task_id: str,
+            intent: RemoveIntent = RemoveIntent.REMOVE_TASK,
+    ) -> bool:
+        """
+        删除/停止任务，根据 intent 区分三种语义：
+
+        - stop_seed   : 暂停做种，保留文件和 resume data，任务从内存移除
+                        → 下次重新 add_magnet 可以用 resume data 恢复
+        - remove_task : 移除任务，保留文件，清除 resume data
+                        → 文件还在，但任务记录彻底消失
+        - delete_all  : 移除任务 + 删除已下载文件
+                        → 彻底清除，不可恢复
+        """
         task = self._tasks.get(task_id)
         if not task:
             return False
-        flags = lt.options_t.delete_files if delete_files else 0
-        self._session.remove_torrent(task.handle, flags)
-        monitor.remove_task(task_id)
-        del self._tasks[task_id]
-        logger.info(f"任务已删除: {task_id} delete_files={delete_files}")
+
+        resume_file = Path(task.save_path) / f".{task_id}.resume"
+
+        if intent == RemoveIntent.STOP_SEED:
+            # ── 仅停止做种 ──────────────────────────────────
+            # libtorrent 层面只 pause，不 remove
+            # handle 保留在 session 里，任务从内存字典移除
+            # resume data 保留，下次可以恢复
+            task.handle.pause()
+            task.handle.save_resume_data()  # 触发异步保存，_on_resume_data 会写盘
+            monitor.remove_task(task_id)
+            del self._tasks[task_id]
+            logger.info(f"任务已停止做种（可恢复）: {task_id}")
+
+        elif intent == RemoveIntent.REMOVE_TASK:
+            # ── 移除任务，保留文件 ──────────────────────────
+            self._session.remove_torrent(task.handle, 0)  # 0 = 不删文件
+            monitor.remove_task(task_id)
+            del self._tasks[task_id]
+            # 清除 resume data（任务已不存在，留着没意义且占空间）
+            if resume_file.exists():
+                try:
+                    resume_file.unlink()
+                    logger.debug(f"已清除 resume data: {resume_file}")
+                except Exception as e:
+                    logger.warning(f"清除 resume data 失败: {e}")
+            logger.info(f"任务已移除（文件保留）: {task_id}")
+
+        elif intent == RemoveIntent.DELETE_ALL:
+            # ── 移除任务 + 删除文件 ─────────────────────────
+            self._session.remove_torrent(task.handle, lt.options_t.delete_files)
+            monitor.remove_task(task_id)
+            del self._tasks[task_id]
+            # 同样清除 resume data
+            if resume_file.exists():
+                try:
+                    resume_file.unlink()
+                    logger.debug(f"已清除 resume data: {resume_file}")
+                except Exception as e:
+                    logger.warning(f"清除 resume data 失败: {e}")
+            logger.info(f"任务已删除（含文件）: {task_id}")
+
         return True
 
     async def pause_task(self, task_id: str):

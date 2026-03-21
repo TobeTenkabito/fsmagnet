@@ -58,31 +58,38 @@
 import { ref, onMounted } from 'vue'
 import { settingsApi } from '../api/index.js'
 
-const emit = defineEmits(['close'])
+const emit   = defineEmits(['close'])
 const saving = ref(false)
+const error  = ref('')
 
 const cfg = ref({
   connections_limit: 500,
-  cache_mb: 512,
-  upload_limit_kb: 50,
-  force_encryption: true,
-  enable_dht: true,
-  enable_upnp: true,
-  enable_lsd: true,
+  cache_mb:          512,
+  upload_limit_kb:   50,
+  force_encryption:  true,
+  enable_dht:        true,
+  enable_upnp:       true,
+  enable_lsd:        true,
 })
 
 onMounted(async () => {
   try {
     const res = await settingsApi.get()
-    Object.assign(cfg.value, res.data)
-  } catch (_) {}
+    Object.assign(cfg.value, res.settings)
+  } catch (e) {
+    console.error('[Settings] 加载失败', e)
+  }
 })
 
 async function save() {
   saving.value = true
+  error.value  = ''
   try {
     await settingsApi.update(cfg.value)
     emit('close')
+  } catch (e) {
+    console.error('[Settings] 保存失败', e)
+    error.value = e?.response?.data?.detail ?? '保存失败，请查看控制台'
   } finally {
     saving.value = false
   }
@@ -103,14 +110,13 @@ async function save() {
   padding: 18px 20px; border-bottom: 1px solid #2a2d3e;
   font-size: 15px; font-weight: 600; color: #e2e8f0;
 }
-.btn-close {
-  background: none; border: none; color: #555;
-  font-size: 16px; cursor: pointer;
-}
+.btn-close { background: none; border: none; color: #555; font-size: 16px; cursor: pointer; }
 .btn-close:hover { color: #fff; }
 
-.modal-body { padding: 20px; display: flex; flex-direction: column; gap: 20px; max-height: 60vh; overflow-y: auto; }
-
+.modal-body {
+  padding: 20px; display: flex; flex-direction: column;
+  gap: 20px; max-height: 60vh; overflow-y: auto;
+}
 .section { display: flex; flex-direction: column; gap: 12px; }
 .section-title { font-size: 12px; color: #7c8cff; font-weight: 700; letter-spacing: 0.05em; }
 
@@ -128,9 +134,10 @@ async function save() {
 }
 
 .modal-footer {
-  display: flex; justify-content: flex-end; gap: 10px;
+  display: flex; justify-content: flex-end; align-items: center; gap: 10px;
   padding: 16px 20px; border-top: 1px solid #2a2d3e;
 }
+.error-msg { color: #f87171; font-size: 12px; margin-right: auto; }
 .btn-cancel {
   background: #1e2130; border: none; color: #aaa;
   border-radius: 8px; padding: 8px 20px; cursor: pointer;

@@ -27,9 +27,21 @@ export const downloadApi = {
     return http.post(`/download/${id}/resume`)
   },
 
-  /** 删除 */
-  remove(id) {
-    return http.delete(`/download/${id}`)
+  /**
+   * 删除任务
+   * @param {string} id
+   * @param {'remove_task'|'delete_all'} intent  默认 remove_task（保留文件）
+   */
+  remove(id, intent = 'remove_task') {
+    return http.delete(`/download/${id}`, { params: { intent } })
+  },
+
+  /**
+   * 停止做种（保留文件，任务状态变为 paused）
+   * 仅对 state === 'seeding' 的任务有效
+   */
+  stopSeed(id) {
+    return http.post(`/download/${id}/stop-seed`)
   },
 }
 

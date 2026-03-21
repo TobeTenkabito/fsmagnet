@@ -1,6 +1,7 @@
 import uuid
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from pydantic import BaseModel
+from core.session import RemoveIntent
 from typing import Optional
 import api.server as srv
 
@@ -47,13 +48,37 @@ async def add_torrent(
         raise HTTPException(status_code=400, detail=str(e))
 
 
+# ── 原来的单一删除接口，升级为支持 intent ───────────────
 @router.delete("/{task_id}")
-async def remove_task(task_id: str, delete_files: bool = False):
-    """删除任务"""
-    ok = await srv.turbo_session.remove_task(task_id, delete_files)
+async def remove_task(
+        task_id: str,
+        intent: RemoveIntent = RemoveIntent.REMOVE_TASK,
+):
+    """
+    删除/停止任务
+
+    intent 可选值：
+    - stop_seed   : 停止做种，保留文件和断点数据（任务可重新添加恢复）
+    - remove_task : 移除任务记录，保留已下载文件（默认）
+    - delete_all  : 移除任务并删除所有已下载文件
+    """
+    ok = await srv.turbo_session.remove_task(task_id, intent)
     if not ok:
         raise HTTPException(status_code=404, detail="任务不存在")
-    return {"ok": True}
+    return {"ok": True, "intent": intent}
+
+
+# ── 语义更清晰的独立接口（可选，给前端提供更直观的路由）──
+@router.post("/{task_id}/stop-seed")
+async def stop_seed(task_id: str):
+    """停止做种，保留文件（做种任务专用）"""
+    task = _find_task(task_id)
+    if task is None:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    if task["state"] != "seeding":
+        raise HTTPException(status_code=400, detail="任务当前不在做种状态")
+    ok = await srv.turbo_session.remove_task(task_id, RemoveIntent.STOP_SEED)
+    return {"ok": ok}
 
 
 @router.post("/{task_id}/pause")
