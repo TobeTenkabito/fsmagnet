@@ -301,6 +301,22 @@ def pump_dialogs():
 # FastAPI 应用
 # ─────────────────────────────────────────────────────
 
+# ─────────────────────────────────────────────────────
+# 工具函数：兼容开发环境和 PyInstaller 打包环境
+# ─────────────────────────────────────────────────────
+def _resource_path(relative: str) -> str:
+    """打包后从 _MEIPASS 取资源，开发时从项目根目录取"""
+    if hasattr(sys, '_MEIPASS'):
+        base = sys._MEIPASS
+    else:
+        base = os.path.abspath('.')
+    return os.path.join(base, relative)
+
+
+# ─────────────────────────────────────────────────────
+# FastAPI 应用
+# ─────────────────────────────────────────────────────
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global turbo_session
@@ -329,26 +345,25 @@ app.include_router(st_router)
 app.include_router(se_router)
 app.include_router(sys_router)
 
-_dist = Path("ui/dist")
-if _dist.exists():
-    app.mount("/", StaticFiles(directory=str(_dist), html=True), name="frontend")
-
-
-def _resource_path(relative: str) -> str:
-    if hasattr(sys, '_MEIPASS'):
-        base = sys._MEIPASS
-    else:
-        base = os.path.abspath('.')
-    return os.path.join(base, relative)
+# ✅ 删除原来的两次挂载，改为只在 run_server() 里挂载一次
 
 
 def run_server(port: int = 17878):
     import uvicorn
-    _dist = Path(_resource_path("ui/dist"))
-    if _dist.exists():
-        app.router.routes = [
-            r for r in app.router.routes
-            if not (hasattr(r, 'name') and r.name == 'frontend')
-        ]
-        app.mount("/", StaticFiles(directory=str(_dist), html=True), name="frontend")
+
+    # ✅ 统一用 _resource_path，开发和打包都能找到正确路径
+    dist_path = Path(_resource_path("ui/dist"))
+
+    if dist_path.exists():
+        app.mount(
+            "/",
+            StaticFiles(directory=str(dist_path), html=True),
+            name="frontend",
+        )
+        print(f"[INFO] 前端静态文件已挂载: {dist_path}")
+    else:
+        # 打包后找不到 dist，打印路径方便排查
+        print(f"[WARN] 未找到前端文件: {dist_path}")
+
     uvicorn.run(app, host="127.0.0.1", port=port, log_level="warning")
+    
