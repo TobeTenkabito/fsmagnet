@@ -19,6 +19,8 @@ from utils.system_probe import probe
 from utils.speed_monitor import monitor
 from core.bandwidth import BandwidthController
 from core.peer_scheduler import PeerScheduler
+from core.task_store import upsert_task, remove_task as store_remove_task
+import asyncio
 from enum import Enum
 
 
@@ -113,11 +115,42 @@ class TurboSession:
         self._running = False
         self._bandwidth.stop()
         self._dht.stop()
+
+        if self._tasks:
+            # ✅ 向所有任务发出 save_resume_data 请求
+            pending = {task_id for task_id, task in self._tasks.items()
+                       if task.handle.is_valid()}
+            done_event = asyncio.Event()
+            loop = asyncio.get_event_loop()
+
+            # 临时标记：_on_resume_data 写完一个就从 pending 移除
+            self._stop_pending = pending
+            self._stop_event = done_event
+
+            for task in self._tasks.values():
+                if task.handle.is_valid():
+                    try:
+                        task.handle.save_resume_data(
+                            lt.torrent_handle.save_info_dict |
+                            lt.torrent_handle.only_if_modified
+                        )
+                    except Exception:
+                        pass
+
+            # 继续跑 alert_loop 直到所有 resume data 写完（最多等 5 秒）
+            self._running = True  # 临时重开，让 alert_loop 继续处理
+            try:
+                await asyncio.wait_for(done_event.wait(), timeout=5.0)
+            except asyncio.TimeoutError:
+                logger.warning("stop(): 部分 resume data 未能在 5s 内写完，强制退出")
+            finally:
+                self._running = False
+                self._stop_pending = None
+                self._stop_event = None
+
         for t in self._bg_tasks:
             t.cancel()
-        # 保存所有任务的 resume data
-        for task in self._tasks.values():
-            self._save_resume_data(task)
+
         self._session.pause()
         logger.info("TurboSession 已停止")
 
@@ -207,7 +240,7 @@ class TurboSession:
                 pass
 
         handle = self._session.add_torrent(params)
-        handle.set_max_connections(300)   # 单任务连接上限
+        handle.set_max_connections(300)
         handle.set_max_uploads(-1)
 
         task = DownloadTask(
@@ -217,14 +250,22 @@ class TurboSession:
             handle=handle,
         )
         self._tasks[task_id] = task
+
+        # ✅ 持久化任务
+        upsert_task(task_id, magnet, save_path, task_type="magnet")
         logger.info(f"任务已添加: {task_id}")
 
     async def add_torrent_file(self, task_id: str, torrent_data: bytes, save_path: str):
         """通过 .torrent 文件字节流添加任务"""
-        from pathlib import Path
-        import libtorrent as lt
+        from config import APP_DATA_DIR
 
         Path(save_path).mkdir(parents=True, exist_ok=True)
+
+        # ✅ 保存 .torrent 文件，重启后恢复任务用
+        torrent_dir = APP_DATA_DIR / "torrents"
+        torrent_dir.mkdir(parents=True, exist_ok=True)
+        torrent_path = torrent_dir / f"{task_id}.torrent"
+        torrent_path.write_bytes(torrent_data)
 
         info = lt.torrent_info(lt.bdecode(torrent_data))
         params = lt.add_torrent_params()
@@ -237,6 +278,7 @@ class TurboSession:
             try:
                 with open(resume_file, "rb") as f:
                     params.resume_data = f.read()
+                logger.info(f"任务 {task_id} 已加载断点续传数据")
             except Exception:
                 pass
 
@@ -251,6 +293,9 @@ class TurboSession:
             handle=handle,
         )
         self._tasks[task_id] = task
+
+        # ✅ 持久化任务（uri 存 torrent 文件路径）
+        upsert_task(task_id, str(torrent_path), save_path, task_type="torrent")
         logger.info(f"Torrent 任务已添加: {task_id} - {info.name()}")
 
     # ── TurboSession.remove_task 重构 ────────────────────────
@@ -259,16 +304,6 @@ class TurboSession:
             task_id: str,
             intent: RemoveIntent = RemoveIntent.REMOVE_TASK,
     ) -> bool:
-        """
-        删除/停止任务，根据 intent 区分三种语义：
-
-        - stop_seed   : 暂停做种，保留文件和 resume data，任务从内存移除
-                        → 下次重新 add_magnet 可以用 resume data 恢复
-        - remove_task : 移除任务，保留文件，清除 resume data
-                        → 文件还在，但任务记录彻底消失
-        - delete_all  : 移除任务 + 删除已下载文件
-                        → 彻底清除，不可恢复
-        """
         task = self._tasks.get(task_id)
         if not task:
             return False
@@ -276,42 +311,38 @@ class TurboSession:
         resume_file = Path(task.save_path) / f".{task_id}.resume"
 
         if intent == RemoveIntent.STOP_SEED:
-            # ── 仅停止做种 ──────────────────────────────────
-            # libtorrent 层面只 pause，不 remove
-            # handle 保留在 session 里，任务从内存字典移除
-            # resume data 保留，下次可以恢复
             task.handle.pause()
-            task.handle.save_resume_data()  # 触发异步保存，_on_resume_data 会写盘
+            task.handle.save_resume_data()
             monitor.remove_task(task_id)
             del self._tasks[task_id]
+            # ✅ 从持久化列表移除
+            store_remove_task(task_id)
             logger.info(f"任务已停止做种（可恢复）: {task_id}")
 
         elif intent == RemoveIntent.REMOVE_TASK:
-            # ── 移除任务，保留文件 ──────────────────────────
-            self._session.remove_torrent(task.handle, 0)  # 0 = 不删文件
+            self._session.remove_torrent(task.handle, 0)
             monitor.remove_task(task_id)
             del self._tasks[task_id]
-            # 清除 resume data（任务已不存在，留着没意义且占空间）
             if resume_file.exists():
                 try:
                     resume_file.unlink()
-                    logger.debug(f"已清除 resume data: {resume_file}")
                 except Exception as e:
                     logger.warning(f"清除 resume data 失败: {e}")
+            # ✅ 从持久化列表移除
+            store_remove_task(task_id)
             logger.info(f"任务已移除（文件保留）: {task_id}")
 
         elif intent == RemoveIntent.DELETE_ALL:
-            # ── 移除任务 + 删除文件 ─────────────────────────
             self._session.remove_torrent(task.handle, lt.options_t.delete_files)
             monitor.remove_task(task_id)
             del self._tasks[task_id]
-            # 同样清除 resume data
             if resume_file.exists():
                 try:
                     resume_file.unlink()
-                    logger.debug(f"已清除 resume data: {resume_file}")
                 except Exception as e:
                     logger.warning(f"清除 resume data 失败: {e}")
+            # ✅ 从持久化列表移除
+            store_remove_task(task_id)
             logger.info(f"任务已删除（含文件）: {task_id}")
 
         return True
@@ -452,6 +483,14 @@ class TurboSession:
                     data = lt.bencode(alert.resume_data)
                     with open(resume_file, "wb") as f:
                         f.write(data)
+                    logger.debug(f"resume data 已保存: {task.task_id}")
+
+                    # ✅ 通知 stop() 这个任务已写完
+                    if hasattr(self, "_stop_pending") and self._stop_pending is not None:
+                        self._stop_pending.discard(task.task_id)
+                        if not self._stop_pending and self._stop_event is not None:
+                            loop = asyncio.get_event_loop()
+                            loop.call_soon_threadsafe(self._stop_event.set)
                     break
         except Exception as e:
             logger.warning(f"保存 resume data 失败: {e}")

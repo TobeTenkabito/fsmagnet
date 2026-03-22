@@ -6,6 +6,8 @@ from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 import sys
 import os
+import logging
+logger = logging.getLogger("fsmagnet.server")
 
 from core.session import TurboSession
 
@@ -320,9 +322,37 @@ def _resource_path(relative: str) -> str:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global turbo_session
+    from core.task_store import load_tasks
+    from config import APP_DATA_DIR
+
     turbo_session = TurboSession()
     await turbo_session.start()
+
+    # ✅ 恢复上次的任务
+    tasks = load_tasks()
+    if tasks:
+        logger.info(f"恢复 {len(tasks)} 个历史任务...")
+        for t in tasks:
+            task_id   = t["task_id"]
+            save_path = t["save_path"]
+            task_type = t.get("task_type", "magnet")
+            uri       = t["uri"]
+            try:
+                if task_type == "torrent":
+                    torrent_path = APP_DATA_DIR / "torrents" / f"{task_id}.torrent"
+                    if torrent_path.exists():
+                        torrent_data = torrent_path.read_bytes()
+                        await turbo_session.add_torrent_file(task_id, torrent_data, save_path)
+                    else:
+                        logger.warning(f"任务 {task_id} 的 .torrent 文件丢失，跳过")
+                else:
+                    await turbo_session.add_magnet(task_id, uri, save_path)
+                logger.info(f"  ✓ 恢复任务 {task_id}")
+            except Exception as e:
+                logger.error(f"  ✗ 恢复任务 {task_id} 失败: {e}")
+
     yield
+
     await turbo_session.stop()
 
 
