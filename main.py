@@ -1,5 +1,6 @@
 import sys
 import io
+import os
 import time
 import threading
 import requests
@@ -17,7 +18,6 @@ if sys.stderr and hasattr(sys.stderr, 'buffer'):
 BACKEND_PORT = 17878
 BACKEND_URL  = f"http://127.0.0.1:{BACKEND_PORT}"
 
-# 打包后自动切换为本地后端，开发时用 Vite dev server
 DEV_MODE     = not getattr(sys, 'frozen', False)
 FRONTEND_URL = "http://localhost:5173" if DEV_MODE else BACKEND_URL
 
@@ -46,17 +46,13 @@ def main_thread_loop(window):
 
 
 def main():
-    # 1. 启动后端线程
     backend_thread = threading.Thread(target=start_backend, daemon=True)
     backend_thread.start()
 
-    # 2. 等待后端就绪
     if not wait_for_backend():
-        # 不用 emoji，避免编码问题
         print("[ERROR] 后端启动超时，退出")
         sys.exit(1)
 
-    # 3. 创建 WebView 窗口
     window = webview.create_window(
         title="FSMagnet 极速下载器",
         url=FRONTEND_URL,
@@ -68,16 +64,17 @@ def main():
         confirm_close=True,
     )
 
-    # 4. 注入 window 引用
     srv.webview_window = window
 
-    # 5. 启动 WebView
     webview.start(
         func=main_thread_loop,
         args=(window,),
         debug=False,
         private_mode=False,
     )
+
+    # webview 窗口关闭后，强制杀掉整个进程（含所有子线程）
+    os._exit(0)
 
 
 if __name__ == "__main__":
