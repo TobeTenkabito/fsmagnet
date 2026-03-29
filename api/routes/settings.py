@@ -16,6 +16,7 @@ class SettingsUpdate(BaseModel):
     enable_dht:         Optional[bool] = None   # DHT
     enable_upnp:        Optional[bool] = None   # UPnP
     enable_lsd:         Optional[bool] = None   # 局域网发现
+    theme:              Optional[str] = None    # 主题
 
 
 @router.get("/")
@@ -27,10 +28,17 @@ async def get_settings():
 
 @router.patch("/")
 async def update_settings(req: SettingsUpdate):
-    """更新配置并实时应用到 session"""
     try:
         data = req.dict(exclude_none=True)
-        await srv.turbo_session.apply_settings(data)
+        # ── 把 theme 从 session 参数里剥离出来单独保存 ──
+        theme = data.pop("theme", None)
+        if theme is not None:
+            srv.turbo_session.save_ui_setting("theme", theme)  # 见下方说明
+
+        # 剩余的才传给 libtorrent session
+        if data:
+            await srv.turbo_session.apply_settings(data)
+
         settings = srv.turbo_session.get_settings()
         return {"ok": True, "settings": settings}
     except Exception as e:

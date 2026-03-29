@@ -7,6 +7,26 @@
       </div>
 
       <div class="modal-body">
+
+        <!-- ── 主题选择 ── -->
+        <section class="section">
+          <div class="section-title">🎨 界面主题</div>
+          <div class="theme-grid">
+            <button
+              v-for="t in themes"
+              :key="t.value"
+              class="theme-btn"
+              :class="{ active: cfg.theme === t.value }"
+              @click="selectTheme(t.value)"
+            >
+              <span class="theme-preview" :data-preview="t.value"></span>
+              <span class="theme-label">{{ t.label }}</span>
+              <span v-if="cfg.theme === t.value" class="theme-check">✓</span>
+            </button>
+          </div>
+        </section>
+
+        <!-- ── 下载优化 ── -->
         <section class="section">
           <div class="section-title">🚀 下载优化</div>
           <div class="field">
@@ -23,6 +43,7 @@
           </div>
         </section>
 
+        <!-- ── 网络 ── -->
         <section class="section">
           <div class="section-title">🔒 网络</div>
           <div class="field toggle">
@@ -55,96 +76,110 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, inject } from 'vue'
 import { settingsApi } from '../api/index.js'
 
 const emit   = defineEmits(['close'])
 const saving = ref(false)
 const error  = ref('')
 
+// 从 App.vue provide 注入主题应用函数
+const applyTheme = inject('applyTheme')
+
+const themes = [
+  { value: 'dark',   label: '🌑 黑色' },
+  { value: 'light',  label: '☀️ 白色' },
+  { value: 'blue',   label: '🌊 蓝色' },
+  { value: 'yellow', label: '🌟 黄色' },
+]
+
 const cfg = ref({
+  theme:             'dark',
   connections_limit: 500,
   cache_mb:          512,
-  upload_limit_kb:   50,
-  force_encryption:  true,
+  upload_limit_kb:   0,
+  force_encryption:  false,
   enable_dht:        true,
   enable_upnp:       true,
   enable_lsd:        true,
 })
 
-onMounted(async () => {
-  try {
-    const res = await settingsApi.get()
-    Object.assign(cfg.value, res.settings)
-  } catch (e) {
-    console.error('[Settings] 加载失败', e)
-  }
-})
+function selectTheme(value) {
+  cfg.value.theme = value
+  // 实时预览：立即应用，不需要等保存
+  applyTheme(value)
+}
 
 async function save() {
   saving.value = true
   error.value  = ''
   try {
-    await settingsApi.update(cfg.value)
+    await settingsApi.save(cfg.value)
+    applyTheme(cfg.value.theme)
     emit('close')
   } catch (e) {
-    console.error('[Settings] 保存失败', e)
-    error.value = e?.response?.data?.detail ?? '保存失败，请查看控制台'
+    error.value = '保存失败：' + e.message
   } finally {
     saving.value = false
   }
 }
+
+onMounted(async () => {
+  try {
+    const data = await settingsApi.get()
+    if (data) Object.assign(cfg.value, data)
+  } catch {}
+})
 </script>
 
 <style scoped>
-.overlay {
-  position: fixed; inset: 0; background: rgba(0,0,0,0.65);
-  display: flex; align-items: center; justify-content: center; z-index: 100;
-}
-.modal {
-  background: #161822; border-radius: 14px;
-  border: 1px solid #2a2d3e; width: 480px; max-width: 95vw;
-}
-.modal-header {
-  display: flex; justify-content: space-between; align-items: center;
-  padding: 18px 20px; border-bottom: 1px solid #2a2d3e;
-  font-size: 15px; font-weight: 600; color: #e2e8f0;
-}
-.btn-close { background: none; border: none; color: #555; font-size: 16px; cursor: pointer; }
-.btn-close:hover { color: #fff; }
-
-.modal-body {
-  padding: 20px; display: flex; flex-direction: column;
-  gap: 20px; max-height: 60vh; overflow-y: auto;
-}
-.section { display: flex; flex-direction: column; gap: 12px; }
-.section-title { font-size: 12px; color: #7c8cff; font-weight: 700; letter-spacing: 0.05em; }
-
-.field {
-  display: flex; justify-content: space-between; align-items: center;
-  font-size: 13px; color: #aaa;
-}
-.field input[type="number"] {
-  background: #0f1117; border: 1px solid #2a2d3e;
-  border-radius: 6px; color: #e2e8f0; padding: 5px 10px;
-  width: 120px; text-align: right; outline: none;
-}
-.field.toggle input[type="checkbox"] {
-  width: 18px; height: 18px; accent-color: #7c8cff; cursor: pointer;
+/* ── 主题选择器 ── */
+.theme-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+  margin-top: 8px;
 }
 
-.modal-footer {
-  display: flex; justify-content: flex-end; align-items: center; gap: 10px;
-  padding: 16px 20px; border-top: 1px solid #2a2d3e;
+.theme-btn {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 6px 8px;
+  border-radius: 10px;
+  border: 2px solid transparent;
+  background: var(--bg-card);
+  cursor: pointer;
+  transition: border-color 0.2s, transform 0.15s;
 }
-.error-msg { color: #f87171; font-size: 12px; margin-right: auto; }
-.btn-cancel {
-  background: #1e2130; border: none; color: #aaa;
-  border-radius: 8px; padding: 8px 20px; cursor: pointer;
+.theme-btn:hover  { transform: translateY(-2px); border-color: var(--accent); }
+.theme-btn.active { border-color: var(--accent); }
+
+.theme-preview {
+  width: 40px;
+  height: 28px;
+  border-radius: 6px;
+  display: block;
+  border: 1px solid rgba(255,255,255,0.08);
 }
-.btn-confirm {
-  background: #7c8cff; border: none; color: #fff;
-  border-radius: 8px; padding: 8px 20px; cursor: pointer; font-weight: 600;
+/* 四种主题的预览色块 */
+.theme-preview[data-preview="dark"]   { background: linear-gradient(135deg,#1a1d2e 50%,#7c8cff 100%); }
+.theme-preview[data-preview="light"]  { background: linear-gradient(135deg,#f0f2f8 50%,#4f7cff 100%); }
+.theme-preview[data-preview="blue"]   { background: linear-gradient(135deg,#0d1b3e 50%,#00d4ff 100%); }
+.theme-preview[data-preview="yellow"] { background: linear-gradient(135deg,#1c1a0e 50%,#f5c518 100%); }
+
+.theme-label {
+  font-size: 11px;
+  color: var(--text-sub);
+  white-space: nowrap;
 }
-.btn-confirm:disabled { opacity: 0.5; cursor: not-allowed; }
+.theme-check {
+  position: absolute;
+  top: 4px; right: 6px;
+  font-size: 11px;
+  color: var(--accent);
+  font-weight: bold;
+}
 </style>

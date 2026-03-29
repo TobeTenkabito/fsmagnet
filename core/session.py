@@ -8,7 +8,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional
-
+import json
 import libtorrent as lt
 
 from config import config
@@ -417,11 +417,20 @@ class TurboSession:
         }
 
     def get_settings(self) -> dict:
-        return config.all()
+        settings = config.all()
+        # ── 合并 UI 配置（主题等）────────────────────────────
+        ui = self._load_ui_settings()
+        settings["theme"] = ui.get("theme", "dark")
+        return settings
 
     async def apply_settings(self, new_settings: dict):
+        # ── 剥离 UI 专属配置，不传给 libtorrent ─────────────
+        theme = new_settings.pop("theme", None)
+        if theme is not None:
+            self.save_ui_setting("theme", theme)
+
+        # 以下原有逻辑不变
         config.update(new_settings)
-        # 实时应用到 session
         lt_settings = {}
         if "connections_limit" in new_settings:
             lt_settings["connections_limit"] = new_settings["connections_limit"]
@@ -435,6 +444,30 @@ class TurboSession:
             lt_settings.update(get_encryption_settings(new_settings["force_encryption"]))
         if lt_settings:
             self._session.apply_settings(lt_settings)
+
+    def save_ui_setting(self, key: str, value):
+        """保存 UI 专属配置到独立 json 文件"""
+        data = self._load_ui_settings()
+        data[key] = value
+        try:
+            with open(self._ui_settings_path(), "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2)
+        except Exception as e:
+            logger.warning(f"保存 UI 配置失败: {e}")
+
+    def _load_ui_settings(self) -> dict:
+        path = self._ui_settings_path()
+        if path.exists():
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except Exception:
+                return {}
+        return {}
+
+    def _ui_settings_path(self) -> Path:
+        from config import APP_DATA_DIR
+        return APP_DATA_DIR / "ui_settings.json"
 
     # ── 后台循环 ──────────────────────────────────────────
     async def _alert_loop(self):

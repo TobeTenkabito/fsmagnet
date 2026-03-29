@@ -37,8 +37,8 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
-import { downloadApi, subscribeStats } from './api/index.js'
+import { ref, onMounted, provide,onUnmounted } from 'vue'
+import { downloadApi, subscribeStats, settingsApi } from './api/index.js'
 import SpeedChart    from './components/SpeedChart.vue'
 import TaskList      from './components/TaskList.vue'
 import AddMagnet     from './components/AddMagnet.vue'
@@ -54,6 +54,31 @@ const showSettings = ref(false)
 let sse       = null
 let pollTimer = null
 let sseOk     = false
+
+// ── 主题初始化（App 启动时执行）────────────────────────
+function applyTheme(theme) {
+  document.documentElement.setAttribute('data-theme', theme)
+  localStorage.setItem('app-theme', theme)
+}
+
+async function initTheme() {
+  let theme = 'dark'
+  try {
+    const res = await settingsApi.get()
+    const cfg = res?.settings ?? res        // ← 注意层级
+    if (cfg?.theme) theme = cfg.theme
+  } catch {
+    theme = localStorage.getItem('app-theme') || 'dark'
+  }
+  applyTheme(theme)
+}
+
+// 暴露给子组件使用
+provide('applyTheme', applyTheme)
+
+onMounted(() => {
+  initTheme()
+})
 
 // ── 统一数据处理 ───────────────────────────────────────────
 function applyStats(data) {
@@ -72,99 +97,49 @@ function applyStats(data) {
 // ── 降级轮询 ───────────────────────────────────────────────
 async function poll() {
   try {
-    const data = await downloadApi.list()
-    applyStats({
-      tasks:        data.tasks        ?? [],
-      global_speed: data.global_speed ?? 0,
-      global_ul:    data.global_ul    ?? 0,
-    })
-  } catch (_) {}
+    const data = await downloadApi.getStats()
+    applyStats(data)
+  } catch (e) {
+    console.warn('poll error', e)
+  }
 }
 
-// ── 生命周期 ───────────────────────────────────────────────
-onMounted(() => {
+// ── SSE 连接 ───────────────────────────────────────────────
+function connectSSE() {
   sse = subscribeStats((data) => {
     sseOk = true
     applyStats(data)
   })
-  setTimeout(() => {
-    if (!sseOk) {
-      console.warn('[FSMagnet] SSE 未就绪，降级为轮询模式')
-      poll()
-      pollTimer = setInterval(poll, 2000)
-    }
-  }, 3000)
+}
+
+// ── 任务操作 ───────────────────────────────────────────────
+async function handlePause(id)    { await downloadApi.pause(id);    await poll() }
+async function handleResume(id)   { await downloadApi.resume(id);   await poll() }
+async function handleStopSeed(id) { await downloadApi.stopSeed(id); await poll() }
+async function handleRemove({ id, intent }) {
+  await downloadApi.remove(id, intent)
+  await poll()
+}
+async function handleAdded() {
+  showAdd.value = false
+  await poll()
+}
+
+function formatSpeed(bytes) {
+  if (!bytes) return '0 KB/s'
+  if (bytes >= 1048576) return (bytes / 1048576).toFixed(2) + ' MB/s'
+  return (bytes / 1024).toFixed(1) + ' KB/s'
+}
+
+onMounted(async () => {
+  await initTheme()
+  await poll()
+  connectSSE()
+  pollTimer = setInterval(() => { if (!sseOk) poll() }, 2000)
 })
 
 onUnmounted(() => {
-  sse?.close()
+  sse?.close?.()
   clearInterval(pollTimer)
 })
-
-// ── 工具函数 ───────────────────────────────────────────────
-function formatSpeed(bps) {
-  if (bps < 1024)        return `${bps} B/s`
-  if (bps < 1024 * 1024) return `${(bps / 1024).toFixed(1)} KB/s`
-  return `${(bps / 1024 / 1024).toFixed(2)} MB/s`
-}
-
-// ── 事件处理 ───────────────────────────────────────────────
-async function handleAdded()    { showAdd.value = false }
-async function handlePause(id)  { await downloadApi.pause(id) }
-async function handleResume(id) { await downloadApi.resume(id) }
-
-async function handleRemove({ id, intent }) {
-  try   { await downloadApi.remove(id, intent) }
-  catch (e) { console.error('[handleRemove]', e) }
-}
-
-async function handleStopSeed(id) {
-  try   { await downloadApi.stopSeed(id) }
-  catch (e) { console.error('[handleStopSeed]', e) }
-}
 </script>
-
-<style scoped>
-.app { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
-
-.topbar {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 0 24px; height: 56px;
-  background: #161822; border-bottom: 1px solid #2a2d3e;
-  flex-shrink: 0;
-}
-.logo { display: flex; align-items: center; gap: 8px; }
-.logo-icon { font-size: 22px; }
-.logo-text { font-size: 18px; font-weight: 700; color: #7c8cff; }
-.logo-sub  { font-size: 12px; color: #555; margin-left: 4px; }
-
-.topbar-actions { display: flex; align-items: center; gap: 12px; }
-.global-speed {
-  background: #1e2130; border-radius: 8px;
-  padding: 4px 12px; font-size: 14px; color: #4ade80;
-  display: flex; align-items: center; gap: 4px;
-}
-.speed-label    { opacity: 0.7; font-size: 13px; }
-.speed-label.ul { color: #fb923c; }
-.speed-label.dl { color: #4ade80; }
-.ul-val         { color: #fb923c; }
-
-.btn-add {
-  background: #7c8cff; color: #fff; border: none;
-  border-radius: 8px; padding: 6px 16px;
-  font-size: 14px; cursor: pointer; transition: background 0.2s;
-}
-.btn-add:hover { background: #5a6ef0; }
-
-.btn-icon {
-  background: #1e2130; border: none; color: #aaa;
-  border-radius: 8px; width: 36px; height: 36px;
-  font-size: 18px; cursor: pointer; transition: color 0.2s;
-}
-.btn-icon:hover { color: #fff; }
-
-.main-content {
-  flex: 1; overflow-y: auto;
-  padding: 20px 24px; display: flex; flex-direction: column; gap: 20px;
-}
-</style>
