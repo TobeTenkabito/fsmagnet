@@ -30,15 +30,7 @@ async def get_settings():
 async def update_settings(req: SettingsUpdate):
     try:
         data = req.dict(exclude_none=True)
-        # ── 把 theme 从 session 参数里剥离出来单独保存 ──
-        theme = data.pop("theme", None)
-        if theme is not None:
-            srv.turbo_session.save_ui_setting("theme", theme)  # 见下方说明
-
-        # 剩余的才传给 libtorrent session
-        if data:
-            await srv.turbo_session.apply_settings(data)
-
+        await srv.turbo_session.apply_settings(data)
         settings = srv.turbo_session.get_settings()
         return {"ok": True, "settings": settings}
     except Exception as e:

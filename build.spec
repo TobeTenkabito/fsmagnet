@@ -46,6 +46,6 @@ exe = EXE(
     strip=False,
     upx=False,
     console=False,       # 不显示黑色控制台窗口
-    icon='ui/dist/favicon.ico',
+    icon='favicon.ico',
     onefile=True,
 )

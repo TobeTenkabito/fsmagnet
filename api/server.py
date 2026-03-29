@@ -11,18 +11,12 @@ logger = logging.getLogger("fsmagnet.server")
 
 from core.session import TurboSession
 
-# ── 全局实例 ──────────────────────────────────────────
 turbo_session: TurboSession = None
 webview_window = None
 
 # 对话框类型常量
 OPEN_DIALOG   = 0
 FOLDER_DIALOG = 2
-
-
-# ─────────────────────────────────────────────────────
-# Windows 原生对话框（纯 ctypes，零额外依赖）
-# ─────────────────────────────────────────────────────
 
 
 def _win_pick_folder() -> tuple | None:
@@ -299,13 +293,6 @@ def pump_dialogs():
     pass
 
 
-# ─────────────────────────────────────────────────────
-# FastAPI 应用
-# ─────────────────────────────────────────────────────
-
-# ─────────────────────────────────────────────────────
-# 工具函数：兼容开发环境和 PyInstaller 打包环境
-# ─────────────────────────────────────────────────────
 def _resource_path(relative: str) -> str:
     """打包后从 _MEIPASS 取资源，开发时从项目根目录取"""
     if hasattr(sys, '_MEIPASS'):
@@ -314,10 +301,6 @@ def _resource_path(relative: str) -> str:
         base = os.path.abspath('.')
     return os.path.join(base, relative)
 
-
-# ─────────────────────────────────────────────────────
-# FastAPI 应用
-# ─────────────────────────────────────────────────────
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -374,8 +357,6 @@ app.include_router(dl_router)
 app.include_router(st_router)
 app.include_router(se_router)
 app.include_router(sys_router)
-
-# ✅ 删除原来的两次挂载，改为只在 run_server() 里挂载一次
 
 
 def run_server(port: int = 17878):

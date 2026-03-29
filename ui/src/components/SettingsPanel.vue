@@ -114,7 +114,7 @@ async function save() {
   saving.value = true
   error.value  = ''
   try {
-    await settingsApi.save(cfg.value)
+    await settingsApi.update(cfg.value)
     applyTheme(cfg.value.theme)
     emit('close')
   } catch (e) {
@@ -126,7 +126,8 @@ async function save() {
 
 onMounted(async () => {
   try {
-    const data = await settingsApi.get()
+    const res = await settingsApi.get()
+    const data = res?.settings ?? res  // ← 取 settings 字段
     if (data) Object.assign(cfg.value, data)
   } catch {}
 })

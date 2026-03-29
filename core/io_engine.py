@@ -13,7 +13,7 @@ import os
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict
 
 import aiofiles
 import psutil
@@ -75,7 +75,7 @@ class IOEngine:
         接收来自 libtorrent 的数据块（同步，在回调中调用）
         libtorrent 自身已处理分片写入，这里作为监控钩子
         """
-        pass  # libtorrent 直接写盘，无需手动管理
+        pass
 
     async def verify_piece(self, piece_index: int, data: bytes, expected_sha1: bytes) -> bool:
         """在线程池中并行 SHA1 校验，不阻塞事件循环"""

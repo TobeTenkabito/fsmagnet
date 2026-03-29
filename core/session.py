@@ -424,13 +424,12 @@ class TurboSession:
         return settings
 
     async def apply_settings(self, new_settings: dict):
-        # ── 剥离 UI 专属配置，不传给 libtorrent ─────────────
         theme = new_settings.pop("theme", None)
         if theme is not None:
             self.save_ui_setting("theme", theme)
 
-        # 以下原有逻辑不变
         config.update(new_settings)
+
         lt_settings = {}
         if "connections_limit" in new_settings:
             lt_settings["connections_limit"] = new_settings["connections_limit"]
@@ -442,6 +441,14 @@ class TurboSession:
             lt_settings["cache_size"] = new_settings["cache_mb"] * 1024 // 16
         if "force_encryption" in new_settings:
             lt_settings.update(get_encryption_settings(new_settings["force_encryption"]))
+        # ✅ 补上这三个
+        if "enable_dht" in new_settings:
+            lt_settings["enable_dht"] = new_settings["enable_dht"]
+        if "enable_upnp" in new_settings:
+            lt_settings["enable_upnp"] = new_settings["enable_upnp"]
+        if "enable_lsd" in new_settings:
+            lt_settings["enable_lsd"] = new_settings["enable_lsd"]
+
         if lt_settings:
             self._session.apply_settings(lt_settings)
 

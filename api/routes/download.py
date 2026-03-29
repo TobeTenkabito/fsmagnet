@@ -48,7 +48,6 @@ async def add_torrent(
         raise HTTPException(status_code=400, detail=str(e))
 
 
-# ── 原来的单一删除接口，升级为支持 intent ───────────────
 @router.delete("/{task_id}")
 async def remove_task(
         task_id: str,
@@ -68,7 +67,6 @@ async def remove_task(
     return {"ok": True, "intent": intent}
 
 
-# ── 语义更清晰的独立接口（可选，给前端提供更直观的路由）──
 @router.post("/{task_id}/stop-seed")
 async def stop_seed(task_id: str):
     """停止做种，保留文件（做种任务专用）"""

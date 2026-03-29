@@ -97,10 +97,10 @@ class PeerScheduler:
             return
 
         sorted_peers = sorted(self._peers.values(), key=lambda p: p.score)
-        evict_count = max(1, len(sorted_peers) // 10)  # 剔除最差 10%
+        evict_count = max(1, len(sorted_peers) // 10)
 
         for peer in sorted_peers[:evict_count]:
-            if peer.score < 1.0:  # 只剔除真正差的
+            if peer.score < 1.0:
                 try:
                     self.handle.disconnect_peer(
                         (peer.ip, peer.port),

@@ -5,9 +5,6 @@
 """
 import json
 import logging
-from pathlib import Path
-from typing import Optional
-
 from config import APP_DATA_DIR
 
 logger = logging.getLogger("fsmagnet.task_store")
@@ -45,13 +42,11 @@ def upsert_task(task_id: str, uri: str, save_path: str, task_type: str = "magnet
     task_type: "magnet" | "torrent"
     """
     tasks = load_tasks()
-    # 已存在则更新
     for t in tasks:
         if t["task_id"] == task_id:
             t.update({"uri": uri, "save_path": save_path, "task_type": task_type})
             save_tasks(tasks)
             return
-    # 不存在则追加
     tasks.append({
         "task_id":   task_id,
         "uri":       uri,

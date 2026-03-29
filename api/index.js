@@ -5,7 +5,6 @@ const http = axios.create({
   timeout: 10000,
 })
 
-// ── 下载管理 ──────────────────────────────────────────
 export const downloadApi = {
   /** 获取任务列表 */
   list() {
@@ -45,7 +44,6 @@ export const downloadApi = {
   },
 }
 
-// ── 设置 ──────────────────────────────────────────────
 export const settingsApi = {
   /** 读取设置 */
   get() {
@@ -58,7 +56,6 @@ export const settingsApi = {
   },
 }
 
-// ── SSE 实时推送 ───────────────────────────────────────
 /**
  * 订阅后端 SSE 统计流
  * @param {(data: object) => void} onData  收到数据的回调
@@ -77,7 +74,6 @@ export function subscribeStats(onData) {
   }
 
   es.onerror = () => {
-    // SSE 断线自动重连，不需要手动处理
   }
 
   return es
