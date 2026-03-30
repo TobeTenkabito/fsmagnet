@@ -23,7 +23,6 @@ from core.task_store import upsert_task, remove_task as store_remove_task
 import asyncio
 from enum import Enum
 
-
 class RemoveIntent(str, Enum):
     STOP_SEED = "stop_seed"  # 仅停止做种，保留文件 + resume data（可恢复）
     REMOVE_TASK = "remove_task"  # 移除任务，保留文件，清掉 resume data（不可恢复）
@@ -44,6 +43,16 @@ STATE_MAP = {
     lt.torrent_status.checking_resume_data:   "checking",
 }
 
+PUBLIC_TRACKERS = [
+    "udp://tracker.opentrackr.org:1337/announce",
+    "udp://open.tracker.cl:1337/announce",
+    "udp://tracker.openbittorrent.com:6969/announce",
+    "udp://opentracker.i2p.rocks:6969/announce",
+    "udp://tracker.torrent.eu.org:451/announce",
+    "udp://explodie.org:6969/announce",
+    "udp://tracker.cyberia.is:6969/announce",
+    "https://tracker.tamersunion.org:443/announce",
+]
 
 @dataclass
 class DownloadTask:
@@ -81,29 +90,32 @@ class TurboSession:
         logger.info("TurboSession 启动中...")
 
         hw = probe.summary()
-        logger.info(f"硬件探测: {hw}")
-
         self._session = self._build_session(hw)
         self._dht = DHTManager(self._session)
         self._bandwidth = BandwidthController(self._session)
 
-        # 恢复 DHT 路由表
         self._dht.load_state()
         self._dht.add_bootstrap_nodes()
+        self._dht.ensure_dht_started()
 
-        # 后台任务
         self._running = True
         self._bg_tasks = [
             asyncio.create_task(self._alert_loop()),
             asyncio.create_task(self._stats_loop()),
             asyncio.create_task(self._bandwidth.run()),
             asyncio.create_task(self._dht.run_periodic_save()),
+            asyncio.create_task(self._dht_warmup()),
         ]
-
-        logger.info("✅ TurboSession 启动完成")
-
-        # 异步打印 NAT 诊断（不阻塞启动）
+        logger.info(f"✅ TurboSession 启动完成，DHT 节点数: {self._dht.get_node_count()}")
         asyncio.create_task(self._run_nat_diag())
+
+    async def _dht_warmup(self):
+        self._dht.add_bootstrap_nodes()
+        ready = await self._dht.wait_until_ready(min_nodes=5, timeout=60.0)
+        if ready:
+            logger.info("✅ DHT 预热完成")
+        else:
+            logger.warning("⚠️ DHT 预热超时，将在后台继续建立连接")
 
     async def _run_nat_diag(self):
         loop = asyncio.get_event_loop()
@@ -157,57 +169,54 @@ class TurboSession:
     # ── 构建 libtorrent session ───────────────────────────
     def _build_session(self, hw: dict) -> lt.session:
         ses = lt.session()
-        ses.listen_on(
-            config["listen_port_start"],
-            config["listen_port_end"],
-        )
-
         # 动态参数（按硬件覆盖配置文件）
         dyn_connections = hw["optimal_connections"]
         dyn_cache = hw["optimal_cache_mb"] * 1024 // 16  # 转换为16KB块数
 
         settings = {
+            "listen_interfaces": f"0.0.0.0:{config['listen_port_start']}",
+
             # 连接
-            "connections_limit":        dyn_connections,
-            "active_downloads":         config["active_downloads"],
-            "active_seeds":             config["active_seeds"],
+            "connections_limit": dyn_connections,
+            "active_downloads": config["active_downloads"],
+            "active_seeds": config["active_seeds"],
 
             # 缓存
-            "cache_size":               dyn_cache,
-            "cache_expiry":             300,
-            "use_read_cache":           True,
-            "coalesce_writes":          config["coalesce_writes"],
-            "coalesce_reads":           True,
+            "cache_size": dyn_cache,
+            "cache_expiry": 300,
+            "use_read_cache": True,
+            "coalesce_writes": config["coalesce_writes"],
+            "coalesce_reads": True,
 
             # 网络
-            "enable_dht":               config["enable_dht"],
-            "enable_lsd":               config["enable_lsd"],
-            "enable_upnp":              config["enable_upnp"],
-            "enable_natpmp":            config["enable_natpmp"],
-            "dht_upload_rate_limit":    20000,
+            "enable_dht": config["enable_dht"],
+            "enable_lsd": config["enable_lsd"],
+            "enable_upnp": config["enable_upnp"],
+            "enable_natpmp": config["enable_natpmp"],
+            "dht_upload_rate_limit": 20000,
 
             # 调度
-            "request_queue_time":       config["request_queue_time"],
-            "max_out_request_queue":    config["max_out_request_queue"],
-            "piece_timeout":            config["piece_timeout"],
-            "peer_timeout":             config["peer_timeout"],
-            "whole_pieces_threshold":   config["whole_pieces_threshold"],
+            "request_queue_time": config["request_queue_time"],
+            "max_out_request_queue": config["max_out_request_queue"],
+            "piece_timeout": config["piece_timeout"],
+            "peer_timeout": config["peer_timeout"],
+            "whole_pieces_threshold": config["whole_pieces_threshold"],
 
             # 限速
-            "upload_rate_limit":        config["upload_limit_kb"] * 1024,
-            "download_rate_limit":      config["download_limit_kb"] * 1024,
+            "upload_rate_limit": config["upload_limit_kb"] * 1024,
+            "download_rate_limit": config["download_limit_kb"] * 1024,
 
             # 磁盘 IO
-            "disk_io_write_mode":       0,   # 异步写入
-            "disk_io_read_mode":        0,
-            "file_pool_size":           500,
+            "disk_io_write_mode": 0,
+            "disk_io_read_mode": 0,
+            "file_pool_size": 500,
 
             # Alert 掩码
             "alert_mask": (
-                lt.alert.category_t.error_notification
-                | lt.alert.category_t.status_notification
-                | lt.alert.category_t.progress_notification
-                | lt.alert.category_t.performance_warning
+                    lt.alert.category_t.error_notification
+                    | lt.alert.category_t.status_notification
+                    | lt.alert.category_t.progress_notification
+                    | lt.alert.category_t.performance_warning
             ),
         }
 
@@ -218,6 +227,7 @@ class TurboSession:
         logger.info(
             f"Session 参数: 连接数={dyn_connections} "
             f"缓存={dyn_cache * 16 // 1024}MB "
+            f"端口={config['listen_port_start']} "
             f"加密={'强制' if config['force_encryption'] else '优先'}"
         )
         return ses
@@ -228,6 +238,13 @@ class TurboSession:
 
         params = lt.parse_magnet_uri(magnet)
         params.save_path = save_path
+
+        # ✅ 注入公共 Tracker，加速 peer 发现，不依赖 DHT
+        existing = set(params.trackers)
+        for t in PUBLIC_TRACKERS:
+            if t not in existing:
+                params.trackers.append(t)
+        logger.info(f"注入 Tracker 后共 {len(params.trackers)} 个")
 
         # 尝试加载 resume data
         resume_file = Path(save_path) / f".{task_id}.resume"

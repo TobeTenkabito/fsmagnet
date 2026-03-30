@@ -110,6 +110,9 @@ function connectSSE() {
     sseOk = true
     applyStats(data)
   })
+  sse.onerror = () => {
+    sseOk = false
+  }
 }
 
 // ── 任务操作 ───────────────────────────────────────────────
@@ -123,6 +126,7 @@ async function handleRemove({ id, intent }) {
 async function handleAdded() {
   showAdd.value = false
   await poll()
+  sseOk = false
 }
 
 function formatSpeed(bytes) {

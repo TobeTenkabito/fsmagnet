@@ -45,7 +45,7 @@ exe = EXE(
     bootloader_ignore_signals=False,
     strip=False,
     upx=False,
-    console=False,       # 不显示黑色控制台窗口
+    console=True,       # 不显示黑色控制台窗口
     icon='favicon.ico',
     onefile=True,
 )

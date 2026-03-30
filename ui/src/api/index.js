@@ -20,6 +20,9 @@ export const downloadApi = {
   list: () =>
     http.get('/download/list').then(r => r.data),
 
+  getStats: () =>
+      http.get('/stats/').then(r => r.data?.stats ?? r.data),
+
   remove: (taskId, deleteFiles = false) =>
     http.delete(`/download/${taskId}`, { params: { delete_files: deleteFiles } }).then(r => r.data),
 

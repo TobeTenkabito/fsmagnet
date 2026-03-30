@@ -22,7 +22,7 @@ DEV_MODE     = not getattr(sys, 'frozen', False)
 FRONTEND_URL = "http://localhost:5173" if DEV_MODE else BACKEND_URL
 
 
-def wait_for_backend(timeout: int = 15) -> bool:
+def wait_for_backend(timeout: int = 30) -> bool:
     deadline = time.time() + timeout
     while time.time() < deadline:
         try:
@@ -36,7 +36,14 @@ def wait_for_backend(timeout: int = 15) -> bool:
 
 
 def start_backend():
-    run_server(port=BACKEND_PORT)
+    try:
+        run_server(port=BACKEND_PORT)
+    except Exception as e:
+        with open(os.path.join(os.path.dirname(sys.executable), "crash.log"), "w", encoding="utf-8") as f:
+            import traceback
+            f.write(traceback.format_exc())
+        print(f"[FATAL] 后端崩溃: {e}")
+        input("按回车退出...")  # ← 让窗口停住
 
 
 def main_thread_loop(window):
