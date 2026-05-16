@@ -17,6 +17,12 @@ export const downloadApi = {
       save_path: savePath,
     }).then(r => r.data),
 
+  createTorrent: (folderPath, outputPath) =>
+    http.post('/download/create-torrent', {
+      folder_path: folderPath,
+      output_path: outputPath || null,
+    }).then(r => r.data),
+
   list: () =>
     http.get('/download/list').then(r => r.data),
 

@@ -2,7 +2,7 @@ import uuid
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from pydantic import BaseModel
 from core.session import RemoveIntent
-from typing import Optional
+from typing import List, Optional
 import api.server as srv
 
 router = APIRouter(prefix="/api/download", tags=["download"])
@@ -125,6 +125,14 @@ class AddTorrentByPathRequest(BaseModel):
     save_path: Optional[str] = None
 
 
+class CreateTorrentRequest(BaseModel):
+    folder_path: str
+    output_path: Optional[str] = None
+    trackers: Optional[List[str]] = None
+    private: bool = False
+    comment: Optional[str] = None
+
+
 @router.post("/add-torrent-path")
 async def add_torrent_by_path(req: AddTorrentByPathRequest):
     """通过本地路径添加 .torrent 文件"""
@@ -141,5 +149,35 @@ async def add_torrent_by_path(req: AddTorrentByPathRequest):
             torrent_data = f.read()
         await srv.turbo_session.add_torrent_file(task_id, torrent_data, save_path)
         return {"ok": True, "task_id": task_id}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/create-torrent")
+async def create_torrent(req: CreateTorrentRequest):
+    """通过用户选择的本地文件夹制作 .torrent 文件"""
+    import asyncio
+    from core.torrent_maker import make_torrent_from_folder
+
+    try:
+        loop = asyncio.get_running_loop()
+        created = await loop.run_in_executor(
+            None,
+            lambda: make_torrent_from_folder(
+                folder_path=req.folder_path,
+                output_path=req.output_path,
+                trackers=req.trackers,
+                comment=req.comment,
+                private=req.private,
+            ),
+        )
+        return {
+            "ok": True,
+            "name": created.name,
+            "output_path": created.output_path,
+            "file_count": created.file_count,
+            "total_size": created.total_size,
+            "piece_size": created.piece_size,
+        }
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
