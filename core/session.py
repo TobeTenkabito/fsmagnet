@@ -21,7 +21,6 @@ from core.bandwidth import BandwidthController
 from core.peer_scheduler import PeerScheduler
 from core.task_store import upsert_task, remove_task as store_remove_task
 from core.trackers import PUBLIC_TRACKERS
-import asyncio
 from enum import Enum
 
 class RemoveIntent(str, Enum):
@@ -85,7 +84,6 @@ class TurboSession:
         self._bandwidth = BandwidthController(self._session)
 
         self._dht.load_state()
-        self._dht.add_bootstrap_nodes()
         self._dht.ensure_dht_started()
 
         self._running = True
@@ -100,7 +98,7 @@ class TurboSession:
         asyncio.create_task(self._run_nat_diag())
 
     async def _dht_warmup(self):
-        self._dht.add_bootstrap_nodes()
+        await self._dht.add_bootstrap_nodes_async()
         ready = await self._dht.wait_until_ready(min_nodes=5, timeout=60.0)
         if ready:
             logger.info("✅ DHT 预热完成")
